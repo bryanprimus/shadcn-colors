@@ -116,7 +116,10 @@ export function saveState(state: LabState) {
   } catch {
     // Storage can be unavailable (private mode, quota); the URL still carries state.
   }
-  const query = buildShareQuery(state)
-  const url = `${window.location.pathname}?${query}${window.location.hash}`
-  window.history.replaceState(null, "", url)
+  try {
+    const query = buildShareQuery(state)
+    window.history.replaceState(null, "", `${window.location.pathname}?${query}${window.location.hash}`)
+  } catch {
+    // Sandboxed hosts can refuse history updates; localStorage still restores state.
+  }
 }
