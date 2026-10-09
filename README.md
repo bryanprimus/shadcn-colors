@@ -1,0 +1,70 @@
+# shadcn colors
+
+A client side theme lab that generates a complete shadcn/ui light and dark theme from one OKLCH brand color, previews it across a live gallery of real shadcn components, and exports a `globals.css` you can paste into any current shadcn project.
+
+```bash
+pnpm install
+pnpm dev        # http://localhost:5173
+pnpm test       # theme engine unit tests (Vitest)
+pnpm build      # typecheck + production build
+pnpm lint
+```
+
+## Stack
+
+- React 19, Vite 8, TypeScript 6
+- Tailwind CSS v4 through `@tailwindcss/vite` (CSS first config, no `tailwind.config.js`)
+- shadcn/ui 4.x, style `base-nova` on **Base UI** (the current shadcn default), Lucide icons
+- Culori for parsing, conversion, sRGB gamut mapping and WCAG contrast
+- Sonner for editor feedback, the shadcn Base UI `toast` inside the preview
+- TanStack Table v9 for the data table (same API as shadcn's current tasks example)
+
+No server, no API routes, no backend. State persists in `localStorage` and in the URL query string, so a theme link is shareable.
+
+## How the engine works
+
+`src/theme` is pure TypeScript and has no React imports.
+
+| File | Responsibility |
+| --- | --- |
+| `types.ts` | `Oklch`, the ordered `COLOR_TOKENS` list, the `ThemeTokens` mapped type, options and analysis types |
+| `parse.ts` | Parses `oklch(...)`, bare `L C H`, percentages, and any CSS color Culori understands |
+| `gamut.ts` | Chroma only gamut mapping (constant L and H), gamut cusp lookup |
+| `contrast.ts` | WCAG ratios, foreground selection from measured contrast, text contrast correction |
+| `generate.ts` | `generateTheme(brand, options)` → `{ light, dark, radius, analysis }` |
+| `serialize.ts` | `serializeGlobalsCss`, `serializeMode`, `toCssVariables` |
+
+Principles:
+
+1. **Lightness hierarchy first.** Surfaces sit in fixed perceptual bands (light background 0.99, card 0.98, secondary 0.95, accent 0.93, border 0.90; dark background 0.13, card 0.17, secondary 0.21, accent 0.25, border 0.28). Brand hue and a capped fraction of brand chroma are injected afterwards.
+2. **Dark mode is designed, not inverted.** A dark brand (L < 0.64) gets a dark mode primary near L 0.70 to 0.76, about 95% of the source chroma, then gamut mapping and a 4.5:1 check against the dark background.
+3. **Foregrounds are measured.** Primary, secondary, accent and sidebar foregrounds are chosen by computing contrast against the actual generated background. If no ink reaches the target, the ink moves to the extreme and then the background lightness is nudged.
+4. **Semantic colors keep their meaning.** Destructive stays red. If the brand itself is red, destructive is separated from primary by lightness.
+5. **Charts** start from the brand and rotate hue (+150°, +60°, +270°, +210°) at matched chroma with staggered lightness.
+6. **Near neutral brands** (C < 0.04) blend smoothly toward shadcn's neutral structure, so `oklch(0.205 0 0)` produces a theme very close to the stock neutral theme.
+7. **Deterministic output.** Every color is gamut mapped and quantized (L and C to 3 decimals, H to 0.1°) before contrast is measured, so the analysis numbers are exactly the numbers in the CSS.
+
+## Preview isolation
+
+The editor and the preview never share variables.
+
+- Each preview pane is a `[data-preview-root]` element carrying the generated tokens as inline custom properties plus a `light` or `dark` class.
+- Base UI portals default to `document.body`, which would escape the theme. `src/lib/portal-container.tsx` provides a per-preview container, and the shadcn portal wrappers (`dialog`, `sheet`, `drawer`, `popover`, `select`, `combobox`, `tooltip`, `hover-card`, `dropdown-menu`, `context-menu`, `navigation-menu`, `alert-dialog`, `toast`) read it via `usePortalContainer()`. This is the only change made to the generated shadcn components.
+- The app's own `@custom-variant dark` is `(&:is(.dark *):not(.dark .light *))`, so a light preview inside the dark editor never receives `dark:` utilities. The exported CSS keeps shadcn's standard `(&:is(.dark *))`.
+- cmdk keeps its selection visible with `scrollIntoView`, which would scroll the entire canvas. `src/lib/contain-scroll.ts` limits that to elements inside `[data-scroll-contain]`.
+
+## Output compatibility
+
+`serializeGlobalsCss` mirrors the `index.css` that `shadcn init -t vite` writes today: `tailwindcss`, `tw-animate-css` and `shadcn/tailwind.css` imports, the dark custom variant, the `@theme inline` color and radius scale (`sm` through `4xl`), `:root`, `.dark`, and the base layer. The optional Geist lines match a default init; turn them off if your project uses another font. The output was verified by pasting it into an untouched `shadcn init -t vite` scaffold and running its production build.
+
+## Project layout
+
+```
+src/theme/                 pure theme engine and tests
+src/state/                 persistence (localStorage + URL) and the ThemeLab context
+src/components/ui/         shadcn components (generated by the CLI)
+src/components/previews/   realistic gallery blocks built from shadcn components
+src/components/component-gallery/  section registry, search and rendering
+src/components/preview/    PreviewRoot: variables, portal container, toast manager
+src/components/theme-controls/, token-inspector/, code-output/, theme-analysis/, editor/
+```
